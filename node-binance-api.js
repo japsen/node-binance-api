@@ -522,13 +522,17 @@ let api = function Binance( options = {} ) {
      * @param {function} callback - the function to call when information is received
      * @param {boolean} reconnect - whether to reconnect on disconnect
      * @param {object} opened_callback - the function to call when opened
-     * @param {string} stream - optional override of stream endpoint
+     * @param {string} custom_stream - optional override of stream endpoint
      * @return {WebSocket} - websocket reference
      */
-    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false, stream = stream) {
+    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false, custom_stream = false) {
         let httpsproxy = process.env.https_proxy || false;
         let socksproxy = process.env.socks_proxy || false;
         let ws = false;
+        let socketStream = stream;
+        if (custom_stream) {
+            socketStream = custom_stream;
+        }
 
         if ( socksproxy !== false ) {
             socksproxy = proxyReplacewithIp( socksproxy );
@@ -538,14 +542,14 @@ let api = function Binance( options = {} ) {
                 host: parseProxy( socksproxy )[1],
                 port: parseProxy( socksproxy )[2]
             } );
-            ws = new WebSocket( stream + endpoint, { agent: agent } );
+            ws = new WebSocket( socketStream + endpoint, { agent: agent } );
         } else if ( httpsproxy !== false ) {
             if ( Binance.options.verbose ) Binance.options.log( 'using proxy server ' + agent );
             let config = url.parse( httpsproxy );
             let agent = new HttpsProxyAgent( config );
-            ws = new WebSocket( stream + endpoint, { agent: agent } );
+            ws = new WebSocket( socketStream + endpoint, { agent: agent } );
         } else {
-            ws = new WebSocket( stream + endpoint );
+            ws = new WebSocket( socketStream + endpoint );
         }
 
         if ( Binance.options.verbose ) Binance.options.log( 'Subscribed to ' + endpoint );
