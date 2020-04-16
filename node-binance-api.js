@@ -10,7 +10,7 @@
 let api = function Binance( options = {} ) {
     //'use strict'; // eslint-disable-line no-unused-expressions
     let Binance = this; // eslint-disable-line consistent-this
-    
+
     const WebSocket = require( 'ws' );
     const request = require( 'request' );
     const crypto = require( 'crypto' );
@@ -26,6 +26,7 @@ let api = function Binance( options = {} ) {
     let fapi = 'https://fapi.binance.com/fapi/';
     let fapiTest = 'https://testnet.binancefuture.com/fapi/';
     let stream = 'wss://stream.binance.com:9443/ws/';
+    let fstream = 'wss://fstream.binance.com/ws/';
     let combineStream = 'wss://stream.binance.com:9443/stream?streams=';
     const userAgent = 'Mozilla/4.0 (compatible; Node Binance API)';
     const contentType = 'application/x-www-form-urlencoded';
@@ -521,9 +522,10 @@ let api = function Binance( options = {} ) {
      * @param {function} callback - the function to call when information is received
      * @param {boolean} reconnect - whether to reconnect on disconnect
      * @param {object} opened_callback - the function to call when opened
+     * @param {string} stream - optional override of stream endpoint
      * @return {WebSocket} - websocket reference
      */
-    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false ) {
+    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false, stream = stream) {
         let httpsproxy = process.env.https_proxy || false;
         let socksproxy = process.env.socks_proxy || false;
         let ws = false;
@@ -2320,12 +2322,12 @@ let api = function Binance( options = {} ) {
             params.symbol = symbol;
             return promiseRequest( 'v1/aggTrades', params, {base:fapi} );
         },
-        
+
         futuresUserTrades: async ( symbol, params = {} ) => {
             params.symbol = symbol;
             return promiseRequest( 'v1/userTrades', params, {base:fapi, type:'SIGNED'} );
         },
-        
+
         futuresGetDataStream: async ( params = {} ) => {
             //A User Data Stream listenKey is valid for 60 minutes after creation. setInterval
             return promiseRequest( 'v1/listenKey', params, {base:fapi, type:'SIGNED', method:'POST'} );
@@ -2343,7 +2345,7 @@ let api = function Binance( options = {} ) {
             if ( symbol ) params.symbol = symbol;
             return promiseRequest( 'v1/allForceOrders', params, {base:fapi} );
         },
-        
+
         futuresPositionRisk: async ( params = {} ) => {
             return promiseRequest( 'v1/positionRisk', params, {base:fapi, type:'SIGNED'} ).then( r=>r.reduce( ( out, i ) => ( ( out[i.symbol] = i ), out ), {} ) );
         },
@@ -2379,12 +2381,12 @@ let api = function Binance( options = {} ) {
             params.type = type;
             return promiseRequest( 'v1/positionMargin', params, {base:fapi, method:'POST', type:'SIGNED'} );
         },
-        
+
         futuresPositionMarginHistory: async ( symbol, params = {} ) => {
             params.symbol = symbol;
             return promiseRequest( 'v1/positionMargin/history', params, {base:fapi, type:'SIGNED'} );
         },
-        
+
         futuresIncome: async ( params = {} ) => {
             return promiseRequest( 'v1/income', params, {base:fapi, type:'SIGNED'} );
         },
@@ -2425,9 +2427,9 @@ let api = function Binance( options = {} ) {
         futuresMarketSell: async ( symbol, quantity, params = {} ) => {
             return futuresOrder( 'SELL', symbol, quantity, false, params );
         },
-        
+
         futuresOrder, // side symbol quantity [price] [params]
-        
+
         futuresOrderStatus: async ( symbol, params = {} ) => { // Either orderId or origClientOrderId must be sent
             params.symbol = symbol;
             return promiseRequest( 'v1/order', params, {base:fapi, type:'SIGNED'} );
@@ -2501,7 +2503,7 @@ let api = function Binance( options = {} ) {
                 else return Binance.options.log(`futuresOrder ${side} (${symbol},${quantity},${price})`, response);
             }, 'POST');
         };*/
-          
+
         //** Margin methods */
         /**
          * Creates an order
@@ -2617,7 +2619,7 @@ let api = function Binance( options = {} ) {
                     return callback.call( this, error, data, symbol );
                 } );
             }
-        },      
+        },
 
         /**
          * Gets the status of an order
@@ -3202,6 +3204,25 @@ let api = function Binance( options = {} ) {
                 }, reconnect );
                 return subscription.endpoint;
             },
+
+            /**
+             * Websocket futures liquidation order stream
+             * @doc https://binance-docs.github.io/apidocs/futures/en/#liquidation-order-streams
+             * @param {string} symbol - symbol to query
+             * @param {function} callback - callback function
+             * @return {string} the websocket endpoint
+             */
+            futuresForceOrder: function futuresForceOrder( symbol = 'BTCUSDT', callback ) {
+                let reconnect = () => {
+                    if ( Binance.options.reconnect ) futuresForceOrder( symbol, callback );
+                };
+
+                let subscription;
+                symbol = symbol.toLowerCase();
+                subscription = subscribe( symbol + '@forceOrder', callback, reconnect, false, fstream );
+                return subscription.endpoint;
+            },
+
 
             /**
              * Websocket prevday percentage
