@@ -525,14 +525,10 @@ let api = function Binance( options = {} ) {
      * @param {string} custom_stream - optional override of stream endpoint
      * @return {WebSocket} - websocket reference
      */
-    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false, custom_stream = false) {
+    const subscribe = function ( endpoint, callback, reconnect = false, opened_callback = false, socketStream = stream) {
         let httpsproxy = process.env.https_proxy || false;
         let socksproxy = process.env.socks_proxy || false;
         let ws = false;
-        let socketStream = stream;
-        if (custom_stream) {
-            socketStream = custom_stream;
-        }
 
         if ( socksproxy !== false ) {
             socksproxy = proxyReplacewithIp( socksproxy );
