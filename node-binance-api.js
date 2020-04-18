@@ -28,6 +28,7 @@ let api = function Binance( options = {} ) {
     let stream = 'wss://stream.binance.com:9443/ws/';
     let fstream = 'wss://fstream.binance.com/ws/';
     let combineStream = 'wss://stream.binance.com:9443/stream?streams=';
+    let fCombineStream = 'wss://fstream.binance.com/stream?streams=';
     const userAgent = 'Mozilla/4.0 (compatible; Node Binance API)';
     const contentType = 'application/x-www-form-urlencoded';
     Binance.subscriptions = {};
@@ -549,6 +550,7 @@ let api = function Binance( options = {} ) {
         }
 
         if ( Binance.options.verbose ) Binance.options.log( 'Subscribed to ' + endpoint );
+
         ws.reconnect = Binance.options.reconnect;
         ws.endpoint = endpoint;
         ws.isAlive = false;
@@ -646,7 +648,12 @@ let api = function Binance( options = {} ) {
             if ( Binance.options.list_status_callback ) Binance.options.list_status_callback( data );
         } else if ( type === 'outboundAccountPosition' ) {
             // TODO: Does this mean something?
-        } else {
+        } else if ( type === 'ACCOUNT_UPDATE' ) {
+            Binance.options.futures_account_update_callback( data );
+        } else if ( type === 'ORDER_TRADE_UPDATE' ) {
+            Binance.options.futures_order_trade_update_callback( data );
+        }
+        else {
             Binance.options.log( 'Unexpected userData: ' + type );
         }
     };
@@ -2194,6 +2201,38 @@ let api = function Binance( options = {} ) {
         },
 
         /**
+         * Gets the futures candles information for a given symbol
+         * intervals: 1m,3m,5m,15m,30m,1h,2h,4h,6h,8h,12h,1d,3d,1w,1M
+         * @param {string} symbol - the symbol
+         * @param {function} interval - the callback function
+         * @param {function} callback - the callback function
+         * @param {object} options - additional options
+         * @return {promise or undefined} - omitting the callback returns a promise
+         */
+        fCandleSticks: function ( symbol, interval = '5m', callback = false, options = { limit: 500 } ) {
+            let params = Object.assign( { symbol: symbol, interval: interval }, options );
+            if ( !callback ) {
+                return new Promise( ( resolve, reject ) => {
+                    callback = ( error, response ) => {
+                        if ( error ) {
+                            reject( error );
+                        } else {
+                            resolve( response );
+                        }
+                    }
+                    publicRequest( fapi + 'v1/klines', params, function ( error, data ) {
+                        return callback.call( this, error, data, symbol );
+                    } );
+                } )
+            } else {
+                publicRequest( fapi + 'v1/klines', params, function ( error, data ) {
+                    return callback.call( this, error, data, symbol );
+                } );
+            }
+        },
+
+
+        /**
         * Queries the public api
         * @param {string} url - the public api endpoint
         * @param {object} data - the data to send
@@ -2348,6 +2387,10 @@ let api = function Binance( options = {} ) {
 
         futuresPositionRisk: async ( params = {} ) => {
             return promiseRequest( 'v1/positionRisk', params, {base:fapi, type:'SIGNED'} ).then( r=>r.reduce( ( out, i ) => ( ( out[i.symbol] = i ), out ), {} ) );
+        },
+
+        futuresPositionRiskRaw: async ( params = {} ) => {
+            return promiseRequest( 'v1/positionRisk', params, {base:fapi, type:'SIGNED'} );
         },
 
         futuresFundingRate: async ( symbol, params = {} ) => {
@@ -2826,6 +2869,39 @@ let api = function Binance( options = {} ) {
             },
 
             /**
+             * Userdata futures websockets function
+             * @param {function} callback - the callback function
+             * @param {function} execution_callback - optional execution callback
+             * @param {function} subscribed_callback - subscription callback
+             * @param {function} list_status_callback - status callback
+             * @return {undefined}
+             */
+            futuresUserData: function futuresUserData( callback, execution_callback = false, subscribed_callback = false, list_status_callback = false ) {
+                let reconnect = () => {
+                    if ( Binance.options.reconnect ) futuresUserData( callback, execution_callback, subscribed_callback );
+                };
+                apiRequest( fapi + 'v1/listenKey', {}, function ( error, response ) {
+                    Binance.options.flistenKey = response.listenKey;
+                    setTimeout( function userDataKeepAlive() { // keepalive
+                        try {
+                            apiRequest( fapi + 'v1/listenKey?listenKey=' + Binance.options.flistenKey, {}, function ( err ) {
+                                if ( err ) setTimeout( userDataKeepAlive, 60000 ); // retry in 1 minute
+                                else setTimeout( userDataKeepAlive, 60 * 30 * 1000 ); // 30 minute keepalive
+                            }, 'PUT' );
+                        } catch ( error ) {
+                            setTimeout( userDataKeepAlive, 60000 ); // retry in 1 minute
+                        }
+                    }, 60 * 30 * 1000 ); // 30 minute keepalive
+                    Binance.options.futures_account_update_callback = callback;
+                    Binance.options.futures_order_trade_update_callback = execution_callback;
+                    const subscription = subscribe( Binance.options.flistenKey, userDataHandler, reconnect, false, fstream );
+                    if ( subscribed_callback ) subscribed_callback( subscription.endpoint );
+                }, 'POST' );
+            },
+
+
+
+            /**
              * Subscribe to a generic websocket
              * @param {string} url - the websocket endpoint
              * @param {function} callback - optional execution callback
@@ -3145,6 +3221,29 @@ let api = function Binance( options = {} ) {
                     symbolChartInit( symbol );
                     subscription = subscribe( symbol.toLowerCase() + '@kline_' + interval, handleKlineStreamData, reconnect );
                     getSymbolKlineSnapshot( symbol, limit );
+                }
+                return subscription.endpoint;
+            },
+
+
+            fCandleSticks: function fCandleSticks(symbols, interval, callback) {
+                let reconnect = () => {
+                    if ( Binance.options.reconnect ) fCandleSticks( symbols, interval, callback );
+                };
+
+                /* If an array of symbols are sent we use a combined stream connection rather.
+                 This is transparent to the developer, and results in a single socket connection.
+                 This essentially eliminates "unexpected response" errors when subscribing to a lot of data. */
+                let subscription;
+                if ( Array.isArray( symbols ) ) {
+                    if ( !isArrayUnique( symbols ) ) throw Error( 'candlesticks: "symbols" cannot contain duplicate elements.' );
+                    let streams = symbols.map( function ( symbol ) {
+                        return symbol.toLowerCase() + '@kline_' + interval;
+                    } );
+                    subscription = subscribeCombined( streams, callback, reconnect, fCombineStream );
+                } else {
+                    let symbol = symbols.toLowerCase();
+                    subscription = subscribe( symbol + '@kline_' + interval, callback, reconnect, fstream);
                 }
                 return subscription.endpoint;
             },
