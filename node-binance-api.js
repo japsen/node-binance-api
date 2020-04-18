@@ -910,6 +910,7 @@ let api = function Binance( options = {} ) {
         let symbol = depth.s, obj;
         let context = Binance.depthCacheContext[symbol];
         let updateDepthCache = () => {
+
             Binance.depthCache[symbol].eventTime = depth.E;
             for ( obj of depth.b ) { //bids
                 if ( obj[1] === '0.00000000' ) {
@@ -2972,6 +2973,7 @@ let api = function Binance( options = {} ) {
              * @param {int} limit - the number of entries
              * @return {string} the websocket endpoint
              */
+
             depthCache: function depthCacheFunction( symbols, callback, limit = 500 ) {
                 let reconnect = () => {
                     if ( Binance.options.reconnect ) depthCacheFunction( symbols, callback, limit );
@@ -3068,6 +3070,119 @@ let api = function Binance( options = {} ) {
                             results.forEach( updateSymbolDepthCache );
                         } );
                     } );
+                    assignEndpointIdToContext( symbol, subscription.endpoint );
+                }
+                return subscription.endpoint;
+            },
+
+
+
+            /**
+             * Websocket futures depth cache
+             * @param {array/string} symbols - an array or string of symbols to query
+             * @param {function} callback - callback function
+             * @param {int} limit - the number of entries
+             * @return {string} the websocket endpoint
+             */
+            futuresDepthCache: function futuresDepthCacheFunction( symbols, callback, limit = 5 ) {
+                let reconnect = () => {
+                    if ( Binance.options.reconnect ) futuresDepthCacheFunction( symbols, callback, limit );
+                };
+
+                let symbolDepthInit = symbol => {
+                    if ( typeof Binance.depthCacheContext[symbol] === 'undefined' ) Binance.depthCacheContext[symbol] = {};
+                    let context = Binance.depthCacheContext[symbol];
+                    context.snapshotUpdateId = null;
+                    context.lastEventUpdateId = null;
+                    context.messageQueue = [];
+                    Binance.depthCache[symbol] = { bids: {}, asks: {} };
+                };
+
+                let assignEndpointIdToContext = ( symbol, endpointId ) => {
+                    if ( Binance.depthCacheContext[symbol] ) {
+                        let context = Binance.depthCacheContext[symbol];
+                        context.endpointId = endpointId;
+                    }
+                };
+
+                let handleDepthStreamData = depth => {
+                    let symbol = depth.data.s;
+                    let context = Binance.depthCacheContext[symbol];
+                    if ( context.messageQueue && !context.snapshotUpdateId ) {
+                        context.messageQueue.push( depth.data );
+                    } else {
+                        try {
+                            depthHandler( depth.data );
+                        } catch ( err ) {
+                            // on socket reconnects console.log(err);
+                            return terminate( context.endpointId, true );
+                        }
+                        if ( callback ) callback( symbol, Binance.depthCache[symbol], context );
+                    }
+                };
+
+                let getSymbolDepthSnapshot = ( symbol, cb ) => {
+                    publicRequest( fapi + 'v1/depth', { symbol: symbol, limit: limit }, function ( error, json ) {
+                        if ( error ) {
+                            return cb( error, null );
+                        }
+                        // Store symbol next use
+                        json.symb = symbol;
+                        cb( null, json )
+                    } );
+                };
+
+                let updateSymbolDepthCache = json => {
+                    // Get previous store symbol
+                    let symbol = json.symb;
+                    // Initialize depth cache from snapshot
+                    Binance.depthCache[symbol] = depthData( json );
+                    // Prepare depth cache context
+                    let context = Binance.depthCacheContext[symbol];
+                    context.snapshotUpdateId = json.lastUpdateId;
+                    console.log('updateSymbolDepthCache');
+                    context.messageQueue = context.messageQueue.filter( depth => depth.u > context.snapshotUpdateId );
+                    // Process any pending depth messages
+                    for ( let depth of context.messageQueue ) {
+                        /* Although sync errors shouldn't ever happen here, we catch and swallow them anyway
+                         just in case. The stream handler function above will deal with broken caches. */
+                        try {
+                            depthHandler( depth );
+                        } catch ( err ) {
+                            // Do nothing
+                        }
+                    }
+                    delete context.messageQueue;
+                    if ( callback ) callback( symbol, Binance.depthCache[symbol] );
+                };
+
+                /* If an array of symbols are sent we use a combined stream connection rather.
+                 This is transparent to the developer, and results in a single socket connection.
+                 This essentially eliminates "unexpected response" errors when subscribing to a lot of data. */
+                let subscription;
+                if ( Array.isArray( symbols ) ) {
+                    throw Error( 'futuresDepthCache: multiple symbols not implemented!' );
+                    if ( !isArrayUnique( symbols ) ) throw Error( 'depthCache: "symbols" cannot contain duplicate elements.' );
+                    symbols.forEach( symbolDepthInit );
+                    let streams = symbols.map( function ( symbol ) {
+                        return symbol.toLowerCase() + '@depth';
+                    } );
+                    subscription = subscribeCombined( streams, handleDepthStreamData, reconnect, function () {
+                        async.mapLimit( symbols, 50, getSymbolDepthSnapshot, ( err, results ) => {
+                            if ( err ) throw err;
+                            results.forEach( updateSymbolDepthCache );
+                        });
+                    } );
+                    symbols.forEach( s => assignEndpointIdToContext( s, subscription.endpoint ) );
+                } else {
+                    let symbol = symbols;
+                    symbolDepthInit( symbol );
+                    subscription = subscribe( symbol.toLowerCase() + '@depth@500ms', handleDepthStreamData, reconnect, function () {
+                        async.mapLimit( [symbol], 1, getSymbolDepthSnapshot, ( err, results ) => {
+                            if ( err ) throw err;
+                            results.forEach( updateSymbolDepthCache );
+                        } );
+                    }, fCombineStream );
                     assignEndpointIdToContext( symbol, subscription.endpoint );
                 }
                 return subscription.endpoint;
