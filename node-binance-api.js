@@ -3437,6 +3437,25 @@ let api = function Binance( options = {} ) {
                 return subscription.endpoint;
             },
 
+            /**
+             * Websocket futures markprice stream
+             * @doc https://binance-docs.github.io/apidocs/futures/en/#mark-price-stream
+             * @param {string} symbol - symbol to query
+             * @param {function} callback - callback function
+             * @return {string} the websocket endpoint
+             */
+            futuresMarkPrice: function futuresMarkPrice( symbol = 'BTCUSDT', callback ) {
+                let reconnect = () => {
+                    if ( Binance.options.reconnect ) futuresMarkPrice( symbol, callback );
+                };
+
+                let subscription;
+                symbol = symbol.toLowerCase();
+                subscription = subscribe( symbol + '@markPrice@1s', callback, reconnect, false, fstream );
+                return subscription.endpoint;
+            },
+
+
 
             /**
              * Websocket prevday percentage
