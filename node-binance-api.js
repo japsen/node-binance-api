@@ -2205,7 +2205,7 @@ let api = function Binance( options = {} ) {
          * Gets the futures candles information for a given symbol
          * intervals: 1m,3m,5m,15m,30m,1h,2h,4h,6h,8h,12h,1d,3d,1w,1M
          * @param {string} symbol - the symbol
-         * @param {function} interval - the callback function
+         * @param {string} interval - the callback function
          * @param {function} callback - the callback function
          * @param {object} options - additional options
          * @return {promise or undefined} - omitting the callback returns a promise
@@ -2482,6 +2482,11 @@ let api = function Binance( options = {} ) {
         futuresCancel: async ( symbol, params = {} ) => { // Either orderId or origClientOrderId must be sent
             params.symbol = symbol;
             return promiseRequest( 'v1/order', params, {base:fapi, type:'SIGNED', method:'DELETE'} );
+        },
+
+        futuresCancelBatch: async ( symbol, params = {} ) => { // Either orderIdList or origClientOrderIdList must be sent
+            params.symbol = symbol;
+            return promiseRequest( 'v1/batchOrders', params, {base:fapi, type:'SIGNED', method:'DELETE'} );
         },
 
         futuresCancelAll: async ( symbol, params = {} ) => {
