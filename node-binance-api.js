@@ -652,6 +652,8 @@ let api = function Binance( options = {} ) {
             Binance.options.futures_account_update_callback( data );
         } else if ( type === 'ORDER_TRADE_UPDATE' ) {
             Binance.options.futures_order_trade_update_callback( data );
+        } else if ( type === 'MARGIN_CALL' ) {
+            Binance.options.futures_margin_call_callback( data );
         }
         else {
             Binance.options.log( 'Unexpected userData: ' + type );
@@ -2882,9 +2884,9 @@ let api = function Binance( options = {} ) {
              * @param {function} list_status_callback - status callback
              * @return {undefined}
              */
-            futuresUserData: function futuresUserData( callback, execution_callback = false, subscribed_callback = false, list_status_callback = false ) {
+            futuresUserData: function futuresUserData( callback, execution_callback = false, subscribed_callback = false, margin_call_callback = false,  list_status_callback = false ) {
                 let reconnect = () => {
-                    if ( Binance.options.reconnect ) futuresUserData( callback, execution_callback, subscribed_callback );
+                    if ( Binance.options.reconnect ) futuresUserData( callback, execution_callback, subscribed_callback, margin_call_callback );
                 };
                 apiRequest( fapi + 'v1/listenKey', {}, function ( error, response ) {
                     Binance.options.flistenKey = response.listenKey;
@@ -2900,6 +2902,7 @@ let api = function Binance( options = {} ) {
                     }, 60 * 30 * 1000 ); // 30 minute keepalive
                     Binance.options.futures_account_update_callback = callback;
                     Binance.options.futures_order_trade_update_callback = execution_callback;
+                    Binance.options.futures_margin_call_callback = margin_call_callback;
                     const subscription = subscribe( Binance.options.flistenKey, userDataHandler, reconnect, false, fstream );
                     if ( subscribed_callback ) subscribed_callback( subscription.endpoint );
                 }, 'POST' );
